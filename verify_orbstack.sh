@@ -229,19 +229,17 @@ s5_app_run() {
     # 이전 인스턴스 정리
     msh "sudo pkill -x agent-app 2>/dev/null || true; sleep 1"
 
-    # 백그라운드 실행 — 환경변수를 인라인으로 직접 주입한다.
-    # sudo -iu 가 login shell 을 띄우긴 하지만 non-interactive 인 경우
-    # Ubuntu 기본 .bashrc 가 *i* 체크에서 일찍 return 하여 .bashrc 끝의
-    # export 가 실행되지 않을 수 있다. 인라인 주입으로 그 의존성 회피.
-    msh "sudo -iu agent-admin bash -c '
-        export AGENT_HOME=/home/agent-admin/agent-app
-        export AGENT_PORT=15034
-        export AGENT_UPLOAD_DIR=\$AGENT_HOME/upload_files
-        export AGENT_KEY_PATH=\$AGENT_HOME/api_keys/t_secret.key
-        export AGENT_LOG_DIR=/var/log/agent-app
-        cd \$AGENT_HOME
-        nohup ./agent-app > /tmp/agent.out 2>&1 &
-    '"
+    # 백그라운드 실행 — env 로 환경변수를 명시 주입하고 단일행 명령으로 처리.
+    # 멀티라인 + sudo -i + 다중 quote 가 겹치면 줄바꿈이 소실되어 'export
+    # ./agent-app' 같은 잘못된 파싱이 일어난다. env 명령을 쓰면 환경변수가 자식
+    # 프로세스에만 정확히 주입되며 .bashrc 의 non-interactive return 이슈도 회피.
+    msh "sudo -u agent-admin env \
+        AGENT_HOME=/home/agent-admin/agent-app \
+        AGENT_PORT=15034 \
+        AGENT_UPLOAD_DIR=/home/agent-admin/agent-app/upload_files \
+        AGENT_KEY_PATH=/home/agent-admin/agent-app/api_keys/t_secret.key \
+        AGENT_LOG_DIR=/var/log/agent-app \
+        bash -c 'cd \$AGENT_HOME && nohup ./agent-app > /tmp/agent.out 2>&1 &'"
 
     # 부트 완료 대기 (최대 20s)
     for i in {1..20}; do
