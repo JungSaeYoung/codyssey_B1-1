@@ -67,8 +67,30 @@ narrate() {
 
 # ── 머신 명령 실행 ────────────────────────────────────────────────────────────
 mrun()  { orb -m "$MACHINE" "$@" 2>&1 | tee -a "$LOG"; }
-msh()   { orb -m "$MACHINE" bash -lc "$1" 2>&1 | tee -a "$LOG"; }
-msh_q() { orb -m "$MACHINE" bash -lc "$1"; }      # 출력 캡처 (조용)
+
+# NARRATE 모드에서 어떤 명령을 보냈는지 보이도록 미리 출력하는 헬퍼.
+# 멀티라인 스크립트도 줄마다 '│' 로 prefix 해서 가독성 ↑.
+_show_cmd() {
+    [[ "${NARRATE:-0}" != "1" ]] && return 0
+    printf "\n${c_dim}┄ commands ──────────────────────────${c_reset}\n"
+    printf "%s\n" "$1" | sed "s/^/  ${c_dim}│${c_reset} /"
+    printf "${c_dim}┄ output ────────────────────────────${c_reset}\n"
+}
+
+# 머신 안에서 명령 실행. NARRATE 면 명령 자체를 먼저 보여주고, 그 다음 실시간 출력을 흘림.
+msh() {
+    _show_cmd "$1"
+    orb -m "$MACHINE" bash -lc "$1" 2>&1 | tee -a "$LOG"
+}
+
+# 출력 캡처용. NARRATE 면 stderr 로 '무엇을 검사하는지' 만 살짝 보여줌
+# (stdout 은 caller 가 $(...) 로 받아야 하므로 절대 오염 X).
+msh_q() {
+    if [[ "${NARRATE:-0}" == "1" ]]; then
+        printf "${c_dim}┄ check\$ %s${c_reset}\n" "$1" >&2
+    fi
+    orb -m "$MACHINE" bash -lc "$1"
+}
 
 # ── 사전 점검 ────────────────────────────────────────────────────────────────
 preflight() {
@@ -401,13 +423,36 @@ s7_cron_setup() {
     ok "crontab registered (waiting 70s for next minute tick)"
 }
 v7_cron_wait() {
+    narrate "§7-b  cron 동작 검증 — 70초 대기 후 로그 증가 확인" \
+"방금 cron 에 매분 monitor.sh 를 돌리도록 등록했다. 진짜 동작하는지 확인하려면
+다음 cron 틱(매분 0초)을 기다려 보면 된다.
+  • 지금의 /var/log/agent-app/monitor.log 라인 수를 기록
+  • 70초 대기 (1분 + 여유 10초)
+  • 라인 수가 늘었으면 cron 이 monitor.sh 를 자동으로 한 번 더 돌렸다는 증거
+  ※ 시연 중 멈춘 듯 보일 수 있어 1초 단위 카운트다운으로 진행 상황을 표시한다."
+    section "§7  cron — 70초 대기 후 라인 증가 검증"
+
     before="$(msh_q 'sudo wc -l < /var/log/agent-app/monitor.log' | tr -d '[:space:]')"
-    echo "  ${c_dim}lines before = $before, sleeping 70s ...${c_reset}"
-    sleep 70
+    printf "  ${c_dim}lines before = %s${c_reset}\n" "$before"
+
+    # 1초 단위 카운트다운 (silent sleep 으로 인한 "멈춤" 오해 방지)
+    for s in $(seq 70 -1 1); do
+        printf "\r  ${c_dim}⏳ cron tick 대기 중...  %2ds 남음   ${c_reset}" "$s"
+        sleep 1
+    done
+    printf "\r  ${c_dim}⏳ 대기 완료, 라인 수 재확인...                   ${c_reset}\n"
+
     after="$(msh_q 'sudo wc -l < /var/log/agent-app/monitor.log' | tr -d '[:space:]')"
-    echo "  ${c_dim}lines after  = $after${c_reset}"
+    printf "  ${c_dim}lines after  = %s${c_reset}\n" "$after"
+
     [[ "$after" -gt "$before" ]] || die "log lines did not grow (before=$before, after=$after)"
     ok "cron appended new line (${before} → ${after})"
+
+    # 마지막 한 줄 미리보기 (시연용 — '진짜로' 새 라인이 어떻게 생겼는지 보여줌)
+    if [[ "${NARRATE:-0}" == "1" ]]; then
+        printf "\n  ${c_dim}새로 누적된 마지막 라인:${c_reset}\n"
+        msh_q 'sudo tail -n1 /var/log/agent-app/monitor.log' | sed "s/^/    ${c_green}>${c_reset} /"
+    fi
 }
 
 # ── 증거 수집 ────────────────────────────────────────────────────────────────
@@ -416,6 +461,16 @@ cp_artifact() {
     msh_q "sudo cat $src" > "$ART/$dst" 2>/dev/null || true
 }
 collect_evidence() {
+    narrate "마무리 — 채점용 증거 자료 수집" \
+"여기까지 §1~§7 의 setup + 검증이 모두 통과했다. 마지막으로 채점·제출용 증거를
+한 파일(evidence.txt) 로 모아둔다.
+  • ss -tulnp            : LISTEN 중인 포트 (20022, 15034)
+  • ufw status verbose   : 방화벽 정책
+  • id 3계정             : 그룹 멤버십
+  • ls -ld + getfacl 3종 : 디렉토리 권한 + ACL
+  • crontab -u           : 등록된 cron 항목
+  • monitor.log tail -n5 : 최근 누적 로그 라인
+모두 .verify-artifacts/ 로 저장되어 시연 종료 후 Finder 로 자동 오픈된다."
     section "Collect evidence into $ART"
     {
         echo '=== ss -tulnp ===';                          msh_q 'sudo ss -tulnp'
@@ -448,6 +503,22 @@ main() {
     s7_cron_setup
     v7_cron_wait
     collect_evidence
+
+    # 최종 wrap-up 설명 (NARRATE 모드면 마지막 페이지로 잠시 멈춤)
+    narrate "🎉 시연 완료 — 우리가 만든 것" \
+"이 한 번의 시연으로 다음을 모두 갖춘 'agent' 운영 환경을 처음부터 구축했다.
+  보안:
+    1. SSH 포트 비표준화 (20022) + root 직접 로그인 차단
+    2. UFW 화이트리스트 — 20022, 15034 외 전부 차단
+  권한 모델:
+    3. 역할별 계정 3종 (admin/dev/test) + 그룹 2종 (common/core)
+    4. 디렉토리 + ACL — '공유 자료' 와 '기밀 자료' 분리, default 로 자동 상속
+  앱 운영:
+    5. 환경변수 외부 주입 + 키 파일 + 바이너리 배포 + Boot Sequence 5/5
+  관제·자동화:
+    6. monitor.sh — 프로세스/포트/리소스 수집 + 임계값 경고 + 로그 누적
+    7. cron 매분 실행 + 로그 로테이션 (10MB × 10개) 정책 내장
+이 모든 단계가 ${c_green}✓${c_yellow} 로 검증되었고, 증거는 .verify-artifacts/ 에 있다."
 
     printf "\n${c_green}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${c_reset}\n"
     printf "${c_green}  ALL CHECKS PASSED${c_reset}  ─ artifacts in $ART\n"
