@@ -1,0 +1,295 @@
+name: Verify B1-1 Mission
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      # ────────────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # systemd 컨테이너 — sshd/ufw/cron 풀스택 사용 가능
+      - name: Start systemd-enabled Ubuntu 24.04 container
+        run: |
+          docker run -d --name codyssey \
+            --privileged \
+            --tmpfs /tmp --tmpfs /run --tmpfs /run/lock \
+            -v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+            -v "${{ github.workspace }}:/work:ro" \
+            jrei/systemd-ubuntu:24.04
+
+          # systemd 부팅 대기 (최대 30s)
+          for i in {1..30}; do
+            state="$(docker exec codyssey systemctl is-system-running 2>/dev/null || true)"
+            case "$state" in
+              running|degraded) echo "systemd up ($state)"; exit 0 ;;
+            esac
+            sleep 1
+          done
+          echo "systemd did not come up"; docker logs codyssey; exit 1
+
+      - name: Install base packages
+        run: |
+          docker exec codyssey bash -lc '
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update -qq
+            apt-get install -y -qq \
+              openssh-server ufw acl cron python3 dos2unix sudo procps iproute2
+          '
+
+      # ────────────────────────────────────────────────────────────────────
+      - name: "§1  SSH — port 20022 + PermitRootLogin no"
+        run: |
+          docker exec codyssey bash -lc '
+            set -e
+            cp -a /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+            sed -i -E \
+              -e "s/^#?Port .*/Port 20022/" \
+              -e "s/^#?PermitRootLogin .*/PermitRootLogin no/" \
+              /etc/ssh/sshd_config
+            systemctl disable --now ssh.socket 2>/dev/null || true
+            systemctl enable --now ssh
+            systemctl restart ssh
+          '
+
+      - name: "§1 ✅ verify SSH config + LISTEN"
+        run: |
+          docker exec codyssey bash -lc '
+            set -e
+            grep -E "^Port 20022$"         /etc/ssh/sshd_config
+            grep -E "^PermitRootLogin no$" /etc/ssh/sshd_config
+            ss -tlnH | awk "\$4 ~ /:20022$/ {found=1} END {exit !found}"
+            echo "OK: SSH listening on 20022, root login disabled"
+          '
+
+      # ────────────────────────────────────────────────────────────────────
+      - name: "§2  UFW — allow 20022/tcp, 15034/tcp only"
+        run: |
+          docker exec codyssey bash -lc '
+            set -e
+            ufw default deny  incoming
+            ufw default allow outgoing
+            ufw allow 20022/tcp comment "SSH"
+            ufw allow 15034/tcp comment "AGENT APP"
+            ufw --force enable
+          '
+
+      - name: "§2 ✅ verify UFW status & rules"
+        run: |
+          docker exec codyssey bash -lc '
+            set -e
+            ufw status verbose | tee /tmp/ufw.txt
+            grep -q "Status: active"                     /tmp/ufw.txt
+            grep -qE "20022/tcp\s+ALLOW IN\s+Anywhere"   /tmp/ufw.txt
+            grep -qE "15034/tcp\s+ALLOW IN\s+Anywhere"   /tmp/ufw.txt
+            echo "OK: UFW active with only 20022/15034 allowed"
+          '
+
+      # ────────────────────────────────────────────────────────────────────
+      - name: "§3  Users & Groups"
+        run: |
+          docker exec codyssey bash -lc '
+            set -e
+            groupadd -f agent-common
+            groupadd -f agent-core
+            for u in agent-admin agent-dev agent-test; do
+              id "$u" >/dev/null 2>&1 || useradd -m -s /bin/bash "$u"
+            done
+            usermod -aG agent-common agent-admin
+            usermod -aG agent-common agent-dev
+            usermod -aG agent-common agent-test
+            usermod -aG agent-core   agent-admin
+            usermod -aG agent-core   agent-dev
+          '
+
+      - name: "§3 ✅ verify group memberships"
+        run: |
+          docker exec codyssey bash -lc '
+            set -e
+            id agent-admin | grep -qE "agent-common" && id agent-admin | grep -qE "agent-core"
+            id agent-dev   | grep -qE "agent-common" && id agent-dev   | grep -qE "agent-core"
+            id agent-test  | grep -qE "agent-common"
+            if id agent-test | grep -qE "agent-core"; then
+              echo "FAIL: agent-test should NOT be in agent-core"; exit 1
+            fi
+            echo "OK: group policy verified"
+          '
+
+      # ────────────────────────────────────────────────────────────────────
+      - name: "§4  Directories + ACL"
+        run: |
+          docker exec codyssey bash -lc '
+            set -e
+            AGENT_HOME=/home/agent-admin/agent-app
+            LOG_DIR=/var/log/agent-app
+
+            sudo -u agent-admin mkdir -p "$AGENT_HOME"/{upload_files,api_keys,bin}
+            mkdir -p "$LOG_DIR"
+
+            chown -R agent-admin:agent-common "$AGENT_HOME"
+            chgrp -R agent-core "$AGENT_HOME/api_keys"
+            chown root:agent-core "$LOG_DIR"
+
+            chmod 750 "$AGENT_HOME"
+            chmod 770 "$AGENT_HOME/upload_files"
+            chmod 770 "$AGENT_HOME/api_keys"
+            chmod 770 "$LOG_DIR"
+            chmod 750 "$AGENT_HOME/bin"
+
+            setfacl -m  g:agent-common:rwx "$AGENT_HOME/upload_files"
+            setfacl -dm g:agent-common:rwx "$AGENT_HOME/upload_files"
+            setfacl -m  g:agent-core:rwx   "$AGENT_HOME/api_keys"
+            setfacl -dm g:agent-core:rwx   "$AGENT_HOME/api_keys"
+            setfacl -m  g:agent-core:rwx   "$LOG_DIR"
+            setfacl -dm g:agent-core:rwx   "$LOG_DIR"
+          '
+
+      - name: "§4 ✅ verify perms + ACL defaults"
+        run: |
+          docker exec codyssey bash -lc '
+            set -e
+            getfacl /home/agent-admin/agent-app/api_keys | grep -q "default:group:agent-core:rwx"
+            getfacl /var/log/agent-app                   | grep -q "default:group:agent-core:rwx"
+            getfacl /home/agent-admin/agent-app/upload_files | grep -q "default:group:agent-common:rwx"
+            echo "OK: directories + default ACLs in place"
+          '
+
+      # ────────────────────────────────────────────────────────────────────
+      - name: "§5  Env vars + key file + deploy agent-app"
+        run: |
+          docker exec codyssey bash -lc '
+            set -e
+            cat >> /home/agent-admin/.bashrc <<EOF
+
+# ----- Agent App ENV -----
+export AGENT_HOME=/home/agent-admin/agent-app
+export AGENT_PORT=15034
+export AGENT_UPLOAD_DIR=\$AGENT_HOME/upload_files
+export AGENT_KEY_PATH=\$AGENT_HOME/api_keys/t_secret.key
+export AGENT_LOG_DIR=/var/log/agent-app
+EOF
+            chown agent-admin:agent-admin /home/agent-admin/.bashrc
+
+            echo "agent_api_key_test" > /home/agent-admin/agent-app/api_keys/t_secret.key
+            chown agent-admin:agent-core /home/agent-admin/agent-app/api_keys/t_secret.key
+            chmod 640 /home/agent-admin/agent-app/api_keys/t_secret.key
+
+            # Deploy app + scripts from checkout
+            dos2unix /work/monitor.sh /work/report.sh /work/archive_logs.sh 2>/dev/null || true
+            install -m 0750 -o agent-admin -g agent-common \
+              /work/agent-app /home/agent-admin/agent-app/agent-app
+            install -m 0750 -o agent-dev   -g agent-core \
+              /work/monitor.sh  /home/agent-admin/agent-app/bin/monitor.sh
+            install -m 0750 -o agent-dev   -g agent-core \
+              /work/report.sh   /home/agent-admin/agent-app/bin/report.sh
+            install -m 0750 -o agent-dev   -g agent-core \
+              /work/archive_logs.sh /home/agent-admin/agent-app/bin/archive_logs.sh
+          '
+
+      - name: "§5  Run agent-app & boot-check"
+        run: |
+          docker exec codyssey bash -lc '
+            set -e
+            # 백그라운드 실행, 부트 로그를 파일로
+            sudo -iu agent-admin bash -c "
+              cd \$AGENT_HOME
+              nohup ./agent-app > /tmp/agent.out 2>&1 &
+            "
+            # 부트 완료 대기
+            for i in {1..20}; do
+              if grep -q "Agent READY" /tmp/agent.out 2>/dev/null; then break; fi
+              sleep 1
+            done
+            cat /tmp/agent.out
+          '
+
+      - name: "§5 ✅ verify boot sequence + LISTEN 15034"
+        run: |
+          docker exec codyssey bash -lc '
+            set -e
+            grep -q "\[1/5\].*\[OK\]" /tmp/agent.out
+            grep -q "\[2/5\].*\[OK\]" /tmp/agent.out
+            grep -q "\[3/5\].*\[OK\]" /tmp/agent.out
+            grep -q "\[4/5\].*\[OK\]" /tmp/agent.out
+            grep -q "\[5/5\].*\[OK\]" /tmp/agent.out
+            grep -q "Agent READY"     /tmp/agent.out
+            ss -tlnH | awk "\$4 ~ /:15034$/ {found=1} END {exit !found}"
+            echo "OK: 5/5 boot checks + Agent READY + LISTEN 15034"
+          '
+
+      # ────────────────────────────────────────────────────────────────────
+      - name: "§6  monitor.sh manual run + log line check"
+        run: |
+          docker exec codyssey bash -lc '
+            set -e
+            sudo -iu agent-admin bash -lc "/home/agent-admin/agent-app/bin/monitor.sh" \
+              | tee /tmp/monitor.out
+            grep -q "\[OK\] (PID:"    /tmp/monitor.out
+            grep -q "Checking port 15034... \[OK\]" /tmp/monitor.out
+            test -s /var/log/agent-app/monitor.log
+            tail -n1 /var/log/agent-app/monitor.log \
+              | grep -qE "^\[[0-9-]+ [0-9:]+\] PID:[0-9]+ CPU:[0-9.]+% MEM:[0-9.]+% DISK_USED:[0-9]+%$"
+            echo "OK: monitor.sh produced HEALTH=[OK] and a valid log line"
+          '
+
+      # ────────────────────────────────────────────────────────────────────
+      - name: "§7  cron — register + wait 70s + verify line growth"
+        run: |
+          docker exec codyssey bash -lc '
+            set -e
+            systemctl enable --now cron
+            sudo -u agent-admin bash -c "
+              ( crontab -l 2>/dev/null | grep -v monitor.sh ;
+                echo \"* * * * * AGENT_HOME=/home/agent-admin/agent-app AGENT_PORT=15034 AGENT_LOG_DIR=/var/log/agent-app /home/agent-admin/agent-app/bin/monitor.sh >> /home/agent-admin/monitor.cron.log 2>&1\"
+              ) | crontab -
+            "
+            sudo -u agent-admin crontab -l | grep -q monitor.sh
+            BEFORE=$(wc -l < /var/log/agent-app/monitor.log)
+            echo "lines before = $BEFORE"
+            sleep 70
+            AFTER=$(wc -l < /var/log/agent-app/monitor.log)
+            echo "lines after  = $AFTER"
+            test "$AFTER" -gt "$BEFORE"
+            echo "OK: cron appended at least 1 new line in 70s"
+          '
+
+      # ────────────────────────────────────────────────────────────────────
+      - name: Collect evidence
+        if: always()
+        run: |
+          mkdir -p artifacts
+          docker exec codyssey bash -lc "
+            ss -tulnp
+            echo --- ufw ---
+            ufw status verbose
+            echo --- ids ---
+            id agent-admin; id agent-dev; id agent-test
+            echo --- acls ---
+            getfacl /home/agent-admin/agent-app/api_keys
+            getfacl /var/log/agent-app
+            echo --- crontab ---
+            crontab -u agent-admin -l
+            echo --- monitor.log tail ---
+            tail -n 10 /var/log/agent-app/monitor.log
+          " > artifacts/evidence.txt 2>&1 || true
+          docker cp codyssey:/tmp/agent.out   artifacts/agent.out   2>/dev/null || true
+          docker cp codyssey:/tmp/monitor.out artifacts/monitor.out 2>/dev/null || true
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: codyssey-b1-1-evidence
+          path: artifacts/
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f codyssey || true

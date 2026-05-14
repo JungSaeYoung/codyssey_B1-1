@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # setup_commands.sh — 미션 환경 구축을 위한 명령어 모음
-# 대상: macOS + OrbStack 의 Ubuntu 22.04 머신 (orbstack "machine" = full Linux VM, systemd 사용 가능)
+# 대상: macOS + OrbStack 의 Ubuntu 24.04 머신 (orbstack "machine" = full Linux VM, systemd 사용 가능)
 #
 # ※ 일괄 실행보다 "각 섹션을 이해하며 순서대로" 실행 권장.
 # ※ 대부분 sudo 권한 필요.
@@ -12,7 +12,7 @@ set -eu
 # ============================================================================
 # macOS 호스트 터미널에서:
 #   brew install orbstack
-#   orb create ubuntu codyssey         # "codyssey" 라는 Ubuntu 22.04 머신 생성
+#   orb create ubuntu:24.04 codyssey   # "codyssey" 라는 Ubuntu 24.04 머신 생성
 #   orb shell -m codyssey              # 또는: ssh codyssey@orb
 #
 # 머신에 진입한 뒤 이 스크립트를 옮겨와 실행:
@@ -36,7 +36,7 @@ sudo sed -i -E \
     -e 's/^#?PermitRootLogin .*/PermitRootLogin no/' \
     /etc/ssh/sshd_config
 
-# Ubuntu 22.04 는 socket-activated ssh.socket 을 사용할 수 있다.
+# Ubuntu 24.04 는 socket-activated ssh.socket 을 사용할 수 있다.
 # Port 변경이 sshd_config 만으로 적용되도록 socket 을 비활성화 후 service 재기동:
 sudo systemctl disable --now ssh.socket 2>/dev/null || true
 sudo systemctl restart ssh
@@ -148,12 +148,13 @@ sudo chmod 640 /home/agent-admin/agent-app/api_keys/t_secret.key
 sudo -u agent-admin bash -lc 'env | grep ^AGENT_'
 
 # ============================================================================
-# [6] 스크립트 배포 (이 디렉토리에서 실행 가정)
+# [6] 스크립트 + agent-app 바이너리 배포 (이 디렉토리에서 실행 가정)
 # ============================================================================
 # CRLF 정리 (Windows → Linux 이동 후 1회)
 sudo apt-get install -y dos2unix
 dos2unix ./monitor.sh ./report.sh ./archive_logs.sh 2>/dev/null || true
 
+# 자동화 스크립트 — agent-dev:agent-core, 0750
 sudo install -m 0750 -o agent-dev -g agent-core \
     ./monitor.sh "/home/agent-admin/agent-app/bin/monitor.sh"
 sudo install -m 0750 -o agent-dev -g agent-core \
@@ -161,7 +162,12 @@ sudo install -m 0750 -o agent-dev -g agent-core \
 sudo install -m 0750 -o agent-dev -g agent-core \
     ./archive_logs.sh "/home/agent-admin/agent-app/bin/archive_logs.sh"
 
-ls -l /home/agent-admin/agent-app/bin/
+# 앱 바이너리 — agent-admin:agent-common, 0750 (x 비트 필요)
+# ※ Ubuntu 24.04 전용 바이너리. 22.04 머신에서는 GLIBC 에러로 실행 안 됨.
+sudo install -m 0750 -o agent-admin -g agent-common \
+    ./agent-app "/home/agent-admin/agent-app/agent-app"
+
+ls -l /home/agent-admin/agent-app/bin/ /home/agent-admin/agent-app/agent-app
 
 # ============================================================================
 # [7] cron 설정 (agent-admin)

@@ -1,7 +1,7 @@
 # Codyssey B1-1 — 리눅스 서버 보안 & 시스템 관제 자동화
 
 > 다중 사용자 환경의 권한 관리와 네트워크 보안 설정부터 시스템 리소스 관제와 로그 관리 자동화까지, 실제 서버 운영 흐름을 직접 구축한다.
-> 실행 환경: **macOS + OrbStack Ubuntu 22.04 머신**
+> 실행 환경: **macOS + OrbStack Ubuntu 24.04 머신**
 
 ---
 
@@ -29,7 +29,7 @@
 | 3 | [report.sh](report.sh) | 로그 분석 리포트 (보너스 1) |
 | 4 | [archive_logs.sh](archive_logs.sh) | 시간 기반 로그 보존 정책 (보너스 2) |
 | 5 | [setup_commands.sh](setup_commands.sh) | 환경 구축 명령어 모음 (OrbStack 절차 포함) |
-| 6 | [agent_app.py](agent_app.py) | 미션 §4 스펙대로 만든 실행 대상 앱 (운영 측 제공이 원칙) |
+| 6 | `agent-app` | 미션 측이 제공하는 Linux 바이너리 (Ubuntu 24.04 전용). 학습자가 만들지 않음 |
 | 7 | [스크립트_설명.md](스크립트_설명.md) | bash 입문자용 스크립트 해설 |
 
 ---
@@ -105,7 +105,7 @@ $AGENT_HOME                          (= /home/agent-admin/agent-app)
 동작:
 
 1. **Health Check (실패 시 `exit 1`)**
-   - 프로세스 `agent_app.py` 실행 여부
+   - 프로세스 `agent-app` 실행 여부
    - TCP `15034` LISTEN 여부
 2. **상태 점검 (경고만)**
    - 방화벽 활성 상태 → 비활성 시 `[WARNING]`
@@ -157,8 +157,8 @@ $AGENT_HOME                          (= /home/agent-admin/agent-app)
 ```bash
 # macOS 호스트
 brew install orbstack
-orb create ubuntu codyssey
-orb push -m codyssey ./*.sh ./*.py /tmp/
+orb create ubuntu:24.04 codyssey
+orb push -m codyssey ./*.sh ./agent-app /tmp/
 orb shell -m codyssey
 
 # 머신 내부 (Windows 작성 파일이면 CRLF 정리)
@@ -189,5 +189,5 @@ bash /tmp/setup_commands.sh   # 또는 섹션별로 발췌 실행
 
 ## 8. 개발 환경
 
-- Ubuntu 22.04 LTS (OrbStack 머신 권장)
+- Ubuntu 24.04 LTS (OrbStack 머신 권장)
 - bash, ss/netstat, ufw 또는 firewalld, acl(`setfacl`/`getfacl`), cron, python3

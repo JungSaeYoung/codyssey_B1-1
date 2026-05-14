@@ -9,7 +9,7 @@ set -u
 # ────────────────────────────────────────────────────────────────────────────
 # 0) 설정
 # ────────────────────────────────────────────────────────────────────────────
-APP_NAME="${APP_NAME:-agent_app.py}"
+APP_NAME="${APP_NAME:-agent-app}"
 APP_PORT="${AGENT_PORT:-15034}"
 LOG_DIR="${AGENT_LOG_DIR:-/var/log/agent-app}"
 LOG_FILE="${LOG_DIR}/monitor.log"
@@ -33,7 +33,10 @@ echo ""
 echo "[HEALTH CHECK]"
 
 # 1-1) 프로세스 확인
-APP_PID="$(pgrep -f "${APP_NAME}" | head -n1 || true)"
+# pgrep -x : 프로세스 이름(comm)과 정확히 일치하는 것만. -f 는 cmdline 전체를 보므로
+# "agent-app" 이 디렉토리 경로($AGENT_HOME=/home/agent-admin/agent-app/...)에도 등장해
+# monitor.sh 자신을 매칭해버리는 자기참조 문제를 피한다.
+APP_PID="$(pgrep -x "${APP_NAME}" | head -n1 || true)"
 if [[ -z "${APP_PID}" ]]; then
     echo "Checking process '${APP_NAME}'... [FAIL]"
     echo "[ERROR] Application process not running."
@@ -59,14 +62,12 @@ echo ""
 # 2) 상태 점검 (경고만)
 # ────────────────────────────────────────────────────────────────────────────
 FIREWALL_OK="N"
-if command -v ufw >/dev/null 2>&1; then
-    if ufw status 2>/dev/null | grep -qi "Status: active"; then
-        FIREWALL_OK="Y"
-    fi
-elif command -v firewall-cmd >/dev/null 2>&1; then
-    if firewall-cmd --state 2>/dev/null | grep -qi "running"; then
-        FIREWALL_OK="Y"
-    fi
+# systemctl is-active 는 root 권한 없이도 동작하므로 cron(agent-admin)에서도 정확.
+# `ufw status` 는 root 가 아니면 거부되어 잘못된 WARNING 을 유발.
+if systemctl is-active --quiet ufw 2>/dev/null; then
+    FIREWALL_OK="Y"
+elif systemctl is-active --quiet firewalld 2>/dev/null; then
+    FIREWALL_OK="Y"
 fi
 if [[ "${FIREWALL_OK}" != "Y" ]]; then
     echo "[WARNING] Firewall is not active."
