@@ -33,6 +33,8 @@ c_green="$(printf '\033[1;32m')"
 c_red="$(printf '\033[1;31m')"
 c_yellow="$(printf '\033[1;33m')"
 c_dim="$(printf '\033[2m')"
+B="$(printf '\033[1m')"     # bold (narrate 박스 제목용)
+R="$c_reset"                # short alias
 
 section() { printf "\n${c_cyan}▸ %s${c_reset}\n" "$*" | tee -a "$LOG"; }
 ok()      { printf "  ${c_green}✓${c_reset} %s\n" "$*" | tee -a "$LOG"; }
