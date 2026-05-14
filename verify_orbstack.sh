@@ -70,11 +70,15 @@ mrun()  { orb -m "$MACHINE" "$@" 2>&1 | tee -a "$LOG"; }
 
 # NARRATE 모드에서 어떤 명령을 보냈는지 보이도록 미리 출력하는 헬퍼.
 # 멀티라인 스크립트도 줄마다 '│' 로 prefix 해서 가독성 ↑.
+# 모든 출력은 stderr 로 — msh 의 stdout 을 외부에서 tee/파이프할 때 debug 노이즈가
+# artifact 파일에 섞이는 것을 막는다.
 _show_cmd() {
     [[ "${NARRATE:-0}" != "1" ]] && return 0
-    printf "\n${c_dim}┄ commands ──────────────────────────${c_reset}\n"
-    printf "%s\n" "$1" | sed "s/^/  ${c_dim}│${c_reset} /"
-    printf "${c_dim}┄ output ────────────────────────────${c_reset}\n"
+    {
+        printf "\n${c_dim}┄ commands ──────────────────────────${c_reset}\n"
+        printf "%s\n" "$1" | sed "s/^/  ${c_dim}│${c_reset} /"
+        printf "${c_dim}┄ output ────────────────────────────${c_reset}\n"
+    } >&2
 }
 
 # 머신 안에서 명령 실행. NARRATE 면 명령 자체를 먼저 보여주고, 그 다음 실시간 출력을 흘림.
@@ -386,8 +390,11 @@ s6_monitor() {
   • 자체 로그 로테이션: 10MB × 10개 파일까지 유지
   소유는 agent-dev, 그룹 agent-core, 0750 — admin 이 그룹 권한으로 실행 가능."
     section "§6  monitor.sh — manual run"
-    msh 'sudo -iu agent-admin bash -lc "/home/agent-admin/agent-app/bin/monitor.sh"' | tee /tmp/_mon.out >/dev/null || true
-    msh_q 'sudo -iu agent-admin bash -lc "/home/agent-admin/agent-app/bin/monitor.sh"' > "$ART/monitor.out" 2>&1 || true
+
+    # 한 번만 실행: 사용자에게 결과를 그대로 보여주면서 동시에 artifact 로 캡처.
+    # tee 가 stdin 을 monitor.out 에 저장 + 다음 단계(터미널) 로도 흘려보냄.
+    msh 'sudo -iu agent-admin bash -lc "/home/agent-admin/agent-app/bin/monitor.sh"' \
+        | tee "$ART/monitor.out" || true
 }
 v6_monitor() {
     grep -q 'Checking process .* \[OK\]'      "$ART/monitor.out" || die "monitor.sh HEALTH process FAIL"
