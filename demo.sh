@@ -50,12 +50,17 @@ command -v orb >/dev/null 2>&1 || {
     printf "    brew install orbstack && open -a OrbStack\n"
     exit 1
 }
-for f in monitor.sh report.sh archive_logs.sh agent-app; do
+for f in monitor.sh report.sh archive_logs.sh agent-app verify_orbstack.sh; do
     if [[ ! -f "$f" ]]; then
         printf "${Y}⚠ 필요한 파일이 없다: %s${R}\n" "$f"
         exit 1
     fi
 done
+
+# Windows/zip 경유로 옮긴 경우 실행 비트(x)가 빠져 있을 수 있다.
+# 셸 스크립트와 바이너리에 실행 권한을 보장한다.
+chmod +x verify_orbstack.sh monitor.sh report.sh archive_logs.sh agent-app 2>/dev/null || true
+
 printf "${G}✓ macOS + orb CLI + 소스 파일 모두 준비됨${R}\n"
 
 # ── 시연 안내 ────────────────────────────────────────────────────────────────
