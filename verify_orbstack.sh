@@ -432,7 +432,11 @@ v7_cron_wait() {
   ※ 시연 중 멈춘 듯 보일 수 있어 1초 단위 카운트다운으로 진행 상황을 표시한다."
     section "§7  cron — 70초 대기 후 라인 증가 검증"
 
-    before="$(msh_q 'sudo wc -l < /var/log/agent-app/monitor.log' | tr -d '[:space:]')"
+    # NOTE: '<' redirect 는 셸이 즉시 처리하므로 default user 권한으로 파일을
+    # 연다. /var/log/agent-app 는 770+agent-core 라 default user 가 못 읽어 fail.
+    # 'sudo bash -c "wc -l < ..."' 형태로 redirect 자체를 root 셸에서 처리.
+    before="$(msh_q "sudo bash -c 'wc -l < /var/log/agent-app/monitor.log'" 2>/dev/null | tr -d '[:space:]' || echo 0)"
+    : "${before:=0}"     # 비어 있으면 0 으로
     printf "  ${c_dim}lines before = %s${c_reset}\n" "$before"
 
     # 1초 단위 카운트다운 (silent sleep 으로 인한 "멈춤" 오해 방지)
@@ -442,7 +446,8 @@ v7_cron_wait() {
     done
     printf "\r  ${c_dim}⏳ 대기 완료, 라인 수 재확인...                   ${c_reset}\n"
 
-    after="$(msh_q 'sudo wc -l < /var/log/agent-app/monitor.log' | tr -d '[:space:]')"
+    after="$(msh_q "sudo bash -c 'wc -l < /var/log/agent-app/monitor.log'" 2>/dev/null | tr -d '[:space:]' || echo 0)"
+    : "${after:=0}"
     printf "  ${c_dim}lines after  = %s${c_reset}\n" "$after"
 
     [[ "$after" -gt "$before" ]] || die "log lines did not grow (before=$before, after=$after)"
