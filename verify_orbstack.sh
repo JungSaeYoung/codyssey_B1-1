@@ -228,9 +228,22 @@ s5_app_run() {
     section "§5  Run agent-app & wait for 'Agent READY'"
     # 이전 인스턴스 정리
     msh "sudo pkill -x agent-app 2>/dev/null || true; sleep 1"
-    # 백그라운드 실행
-    msh "sudo -iu agent-admin bash -c 'cd \$AGENT_HOME && nohup ./agent-app > /tmp/agent.out 2>&1 &'"
-    # 부트 완료 대기
+
+    # 백그라운드 실행 — 환경변수를 인라인으로 직접 주입한다.
+    # sudo -iu 가 login shell 을 띄우긴 하지만 non-interactive 인 경우
+    # Ubuntu 기본 .bashrc 가 *i* 체크에서 일찍 return 하여 .bashrc 끝의
+    # export 가 실행되지 않을 수 있다. 인라인 주입으로 그 의존성 회피.
+    msh "sudo -iu agent-admin bash -c '
+        export AGENT_HOME=/home/agent-admin/agent-app
+        export AGENT_PORT=15034
+        export AGENT_UPLOAD_DIR=\$AGENT_HOME/upload_files
+        export AGENT_KEY_PATH=\$AGENT_HOME/api_keys/t_secret.key
+        export AGENT_LOG_DIR=/var/log/agent-app
+        cd \$AGENT_HOME
+        nohup ./agent-app > /tmp/agent.out 2>&1 &
+    '"
+
+    # 부트 완료 대기 (최대 20s)
     for i in {1..20}; do
         if msh_q 'grep -q "Agent READY" /tmp/agent.out 2>/dev/null'; then
             break
@@ -240,12 +253,20 @@ s5_app_run() {
     cp_artifact /tmp/agent.out agent.out
 }
 
+# 디버깅용: 실패 시 캡처된 agent.out 을 보여주고 die
+die_with_agent_out() {
+    printf "\n  ${c_dim}── captured /tmp/agent.out ──${c_reset}\n"
+    sed 's/^/    /' "$ART/agent.out" 2>/dev/null || true
+    printf "  ${c_dim}── end of agent.out ──${c_reset}\n"
+    die "$1"
+}
+
 v5_app() {
     out="$(msh_q 'cat /tmp/agent.out')"
     for n in 1 2 3 4 5; do
-        echo "$out" | grep -q "\[$n/5\].*\[OK\]" || die "boot step $n/5 not OK"
+        echo "$out" | grep -q "\[$n/5\].*\[OK\]" || die_with_agent_out "boot step $n/5 not OK"
     done
-    echo "$out" | grep -q 'Agent READY' || die "'Agent READY' not printed"
+    echo "$out" | grep -q 'Agent READY' || die_with_agent_out "'Agent READY' not printed"
     msh_q 'sudo ss -tlnH | awk "\$4 ~ /:15034$/ {f=1} END{exit !f}"' \
         || die "port 15034 not LISTEN"
     ok "5/5 boot OK + Agent READY + LISTEN 15034"
