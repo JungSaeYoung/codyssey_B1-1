@@ -142,12 +142,16 @@ s3_users() {
          sudo usermod -aG agent-core   agent-dev"
 }
 v3_users() {
+    # 'msh_q | grep -q' 패턴은 grep 이 매치 즉시 종료할 때 위쪽이 SIGPIPE 를
+    # 받아 pipefail 이 거짓 양성으로 발화한다. 변수에 먼저 캡처해 회피.
     for u in agent-admin agent-dev; do
-        msh_q "id $u" | grep -q 'agent-common' || die "$u not in agent-common"
-        msh_q "id $u" | grep -q 'agent-core'   || die "$u not in agent-core"
+        info="$(msh_q "id $u")"
+        echo "$info" | grep -q 'agent-common' || die "$u not in agent-common"
+        echo "$info" | grep -q 'agent-core'   || die "$u not in agent-core"
     done
-    msh_q 'id agent-test' | grep -q 'agent-common' || die "agent-test not in agent-common"
-    if msh_q 'id agent-test' | grep -q 'agent-core'; then
+    test_info="$(msh_q 'id agent-test')"
+    echo "$test_info" | grep -q 'agent-common' || die "agent-test not in agent-common"
+    if echo "$test_info" | grep -q 'agent-core'; then
         die "agent-test must NOT be in agent-core"
     fi
     ok "group memberships verified"
@@ -175,12 +179,21 @@ s4_acl() {
          sudo setfacl -dm g:agent-core:rwx   "$LD"'
 }
 v4_acl() {
-    msh_q 'sudo getfacl /home/agent-admin/agent-app/upload_files' \
-        | grep -q 'default:group:agent-common:rwx' || die "upload_files default ACL missing"
-    msh_q 'sudo getfacl /home/agent-admin/agent-app/api_keys' \
-        | grep -q 'default:group:agent-core:rwx'   || die "api_keys default ACL missing"
-    msh_q 'sudo getfacl /var/log/agent-app' \
-        | grep -q 'default:group:agent-core:rwx'   || die "log dir default ACL missing"
+    # 'msh_q | grep -q' 패턴은 grep 이 매치 즉시 종료할 때 위쪽이 SIGPIPE 를
+    # 받아 pipefail 이 거짓 양성으로 발화한다 (getfacl 출력이 12줄로 길어 더 자주 발생).
+    # 변수에 먼저 캡처 후 grep 으로 검사.
+    ufacl="$(msh_q 'sudo getfacl /home/agent-admin/agent-app/upload_files')"
+    echo "$ufacl" | grep -q 'default:group:agent-common:rwx' \
+        || die "upload_files default ACL missing"
+
+    kfacl="$(msh_q 'sudo getfacl /home/agent-admin/agent-app/api_keys')"
+    echo "$kfacl" | grep -q 'default:group:agent-core:rwx' \
+        || die "api_keys default ACL missing"
+
+    lfacl="$(msh_q 'sudo getfacl /var/log/agent-app')"
+    echo "$lfacl" | grep -q 'default:group:agent-core:rwx' \
+        || die "log dir default ACL missing"
+
     ok "directories + default ACLs present"
 }
 
@@ -264,7 +277,8 @@ s7_cron_setup() {
                echo \"* * * * * AGENT_HOME=/home/agent-admin/agent-app AGENT_PORT=15034 AGENT_LOG_DIR=/var/log/agent-app /home/agent-admin/agent-app/bin/monitor.sh >> /home/agent-admin/monitor.cron.log 2>&1\"
              ) | crontab -
          '"
-    msh_q 'sudo -u agent-admin crontab -l' | grep -q monitor.sh \
+    crontab_dump="$(msh_q 'sudo -u agent-admin crontab -l')"
+    echo "$crontab_dump" | grep -q monitor.sh \
         || die "crontab not registered"
     ok "crontab registered (waiting 70s for next minute tick)"
 }
