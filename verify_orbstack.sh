@@ -39,6 +39,30 @@ ok()      { printf "  ${c_green}✓${c_reset} %s\n" "$*" | tee -a "$LOG"; }
 warn()    { printf "  ${c_yellow}!${c_reset} %s\n" "$*" | tee -a "$LOG"; }
 die()     { printf "  ${c_red}✗${c_reset} %s\n" "$*" | tee -a "$LOG"; exit 1; }
 
+# ── 시연 모드 (NARRATE=1) — 섹션 시작 전 설명 박스 + 엔터 대기 ───────────────
+NARRATE="${NARRATE:-0}"
+narrate() {
+    local title="$1"; shift
+    local body="$*"
+    local sep_len=70
+    local sep
+    sep="$(printf '─%.0s' $(seq 1 $sep_len))"
+    printf "\n${c_yellow}┌%s${c_reset}\n"  "$sep"
+    printf "${c_yellow}│${c_reset}  ${B}%s${c_reset}\n" "$title"
+    printf "${c_yellow}│${c_reset}\n"
+    printf "%s\n" "$body" | sed "s/^/${c_yellow}│${c_reset}   /"
+    printf "${c_yellow}└%s${c_reset}\n" "$sep"
+    if [[ "$NARRATE" == "1" ]]; then
+        printf "${c_dim}  [엔터를 눌러 명령 실행 — 건너뛰려면 's'+엔터, 종료 'q'+엔터]${c_reset} "
+        local key=""
+        read -r key || true
+        case "$key" in
+            s|S) printf "${c_dim}  (이 섹션 건너뜀 — 검증은 그대로 수행됨)${c_reset}\n";;
+            q|Q) printf "${c_dim}  (시연 중단)${c_reset}\n"; exit 0 ;;
+        esac
+    fi
+}
+
 # ── 머신 명령 실행 ────────────────────────────────────────────────────────────
 mrun()  { orb -m "$MACHINE" "$@" 2>&1 | tee -a "$LOG"; }
 msh()   { orb -m "$MACHINE" bash -lc "$1" 2>&1 | tee -a "$LOG"; }
@@ -80,6 +104,13 @@ ensure_machine() {
 }
 
 install_base() {
+    narrate "사전 — 기본 패키지 설치" \
+"OrbStack 의 Ubuntu 24.04 머신은 미니멀해 미션에 필요한 도구가 빠져 있다.
+  • openssh-server : SSH 서버 데몬(sshd) 과 설정 파일
+  • ufw            : 방화벽(netfilter 의 사람 친화 wrapper)
+  • acl            : setfacl/getfacl 명령 (POSIX 권한 + 디렉토리 ACL)
+  • cron           : 주기 실행 스케줄러
+  • dos2unix etc.  : Windows 작성 파일 CRLF → LF 변환 등 보조 도구"
     section "Install base packages"
     msh 'export DEBIAN_FRONTEND=noninteractive
          sudo apt-get update -qq
@@ -90,6 +121,13 @@ install_base() {
 
 # ── §1 SSH ───────────────────────────────────────────────────────────────────
 s1_ssh() {
+    narrate "§1  SSH — 포트 20022, root 로그인 차단" \
+"기본 22번 포트는 인터넷 봇이 끊임없이 brute-force 시도하는 표적이다.
+  • 포트를 20022 같은 비표준 번호로 옮기면 자동화된 봇의 99% 노이즈를 회피.
+  • PermitRootLogin no — root 직접 로그인 차단. '일반 계정 → sudo' 의 2단계
+    인증을 강제해 '누가 무엇을 했는가' 가 로그로 추적 가능해진다.
+  • 'security through obscurity is not security' — 첫 방어선일 뿐, fail2ban·
+    키 기반 인증 등과 함께 써야 실효성을 가진다는 점은 별도 학습."
     section "§1  SSH — port 20022 + PermitRootLogin no"
     msh "sudo cp -a /etc/ssh/sshd_config /etc/ssh/sshd_config.bak.$(date +%Y%m%d) 2>/dev/null || true
          sudo sed -i -E \
@@ -112,6 +150,13 @@ v1_ssh() {
 
 # ── §2 UFW ───────────────────────────────────────────────────────────────────
 s2_ufw() {
+    narrate "§2  UFW — 화이트리스트 방식 방화벽" \
+"리눅스의 진짜 방화벽은 커널 내장 netfilter. ufw 는 그 위의 친화적 인터페이스.
+  • 기본 정책: 들어오는 통신 전부 거부 (default deny incoming)
+  • 예외만 허용 (allow-list): 20022/tcp (SSH), 15034/tcp (앱)
+  • 'iptables -A INPUT -p tcp --dport 20022 -j ACCEPT' 의 ufw 버전이
+    'ufw allow 20022/tcp'. 같은 netfilter 룰을 만든다.
+  • 결과: 우리가 의도한 두 포트 외 어떤 연결도 막힌다 = 공격 표면 최소화."
     section "§2  UFW — allow 20022/15034 only"
     msh "sudo ufw default deny  incoming
          sudo ufw default allow outgoing
@@ -129,6 +174,15 @@ v2_ufw() {
 
 # ── §3 계정/그룹 ──────────────────────────────────────────────────────────────
 s3_users() {
+    narrate "§3  계정·그룹 — 최소 권한 + 직무 분리" \
+"한 서버를 root 하나로 쓰면 사고 반경이 무제한. 역할별로 계정을 나눈다.
+  계정:
+  • agent-admin : 운영자 — 앱 실행 + cron 운영. (단, sudo 권한은 없음)
+  • agent-dev   : 개발자 — monitor.sh 등 자동화 스크립트 작성
+  • agent-test  : QA     — 업로드/테스트만, 운영 비밀에는 접근 불가
+  그룹 (왜 둘? — 자원의 민감도가 다르기 때문):
+  • agent-common (admin/dev/test 3명) → 업로드 폴더 공유
+  • agent-core   (admin/dev 2명)      → API 키·운영 로그 (test 제외)"
     section "§3  Users & groups"
     msh "sudo groupadd -f agent-common
          sudo groupadd -f agent-core
@@ -159,6 +213,16 @@ v3_users() {
 
 # ── §4 디렉토리 + ACL ────────────────────────────────────────────────────────
 s4_acl() {
+    narrate "§4  디렉토리 + ACL — 자동 상속되는 정책" \
+"§3 의 그룹 구조를 디렉토리 권한으로 물리적으로 실현한다.
+  • upload_files/      → 770, agent-common  (셋이 공동 R/W)
+  • api_keys/          → 770, agent-core    (admin/dev 만)
+  • /var/log/agent-app/→ 770, agent-core    (admin/dev 만)
+  ACL 의 핵심은 'default' (-dm):
+  • 폴더에 default ACL 을 박으면 그 안에 '새로 생기는 모든 파일' 이 자동으로
+    같은 권한을 상속받는다.
+  • monitor.sh 가 매분 로그를 새로 쓰는 환경에서 default 가 없으면 시간이
+    지날수록 정책이 풀려 다른 사용자가 로그를 읽거나 못 읽게 된다."
     section "§4  Directories + ACL"
     msh 'AH=/home/agent-admin/agent-app; LD=/var/log/agent-app
          sudo -u agent-admin mkdir -p "$AH"/{upload_files,api_keys,bin}
@@ -199,6 +263,14 @@ v4_acl() {
 
 # ── §5 환경변수 / 키파일 / 앱 배포 / 실행 / 부트체크 ──────────────────────────
 s5_app_setup() {
+    narrate "§5-a  앱 실행 환경 — 환경변수·키·바이너리 배포" \
+"앱이 동작하려면 '어디에 키가 있나, 어떤 포트 쓰나' 같은 실행 환경 정보가 필요.
+  • 환경변수 5개 (AGENT_HOME / PORT / UPLOAD_DIR / KEY_PATH / LOG_DIR) 등록
+    - .bashrc 영구 등록 (사람이 들어와 쓸 때를 위함)
+    - 실제 실행은 env 명령으로 인라인 주입 (non-interactive 문제 회피)
+  • t_secret.key (640, agent-core) — API 키 파일
+  • agent-app 바이너리를 \$AGENT_HOME 에 배치 (0750, x 비트 필요)
+  ※ 이 바이너리는 Ubuntu 24.04 의 glibc 에 맞춰 빌드 — 22.04 머신은 GLIBC 에러."
     section "§5  Env vars + key file + deploy"
     # 환경변수 영구 등록
     msh "sudo -u agent-admin bash -c 'grep -q AGENT_HOME ~/.bashrc 2>/dev/null || cat >> ~/.bashrc <<EOF
@@ -225,6 +297,15 @@ EOF'"
 }
 
 s5_app_run() {
+    narrate "§5-b  agent-app 실행 → Boot Sequence 5/5 [OK] + 'Agent READY'" \
+"백그라운드로 agent-app 을 띄우고 부트 시퀀스 출력이 모두 [OK] 인지 검증한다.
+  부트 5단계:
+  1) User Account       — root 가 아닌 일반 계정 (UID ≠ 0) 인지
+  2) Environment Vars   — AGENT_HOME 등 5개 모두 채워졌는지
+  3) Required Files     — t_secret.key 내용이 'agent_api_key_test' 인지
+  4) Port Availability  — 15034 가 비어 있는지 (테스트 바인드)
+  5) Log Permission     — /var/log/agent-app 에 쓰기 가능한지
+  모두 통과 후 'Agent READY' 출력 + 0.0.0.0:15034 LISTEN."
     section "§5  Run agent-app & wait for 'Agent READY'"
     # 이전 인스턴스 정리
     msh "sudo pkill -x agent-app 2>/dev/null || true; sleep 1"
@@ -272,6 +353,14 @@ v5_app() {
 
 # ── §6 monitor.sh ────────────────────────────────────────────────────────────
 s6_monitor() {
+    narrate "§6  monitor.sh 수동 실행 — 상태 수집의 동작 확인" \
+"운영 자동화 스크립트 monitor.sh 를 agent-admin 권한으로 1회 실행해 본다.
+  • [HEALTH CHECK]      — 프로세스 'agent-app' 살아 있나? 포트 15034 LISTEN?
+  • [RESOURCE]          — CPU / MEM / DISK 사용률 수집
+  • [WARNING]           — 임계값 초과 시만 출력 (CPU>20%, MEM>10%, DISK>80%)
+  • [INFO]              — /var/log/agent-app/monitor.log 에 1줄 누적
+  • 자체 로그 로테이션: 10MB × 10개 파일까지 유지
+  소유는 agent-dev, 그룹 agent-core, 0750 — admin 이 그룹 권한으로 실행 가능."
     section "§6  monitor.sh — manual run"
     msh 'sudo -iu agent-admin bash -lc "/home/agent-admin/agent-app/bin/monitor.sh"' | tee /tmp/_mon.out >/dev/null || true
     msh_q 'sudo -iu agent-admin bash -lc "/home/agent-admin/agent-app/bin/monitor.sh"' > "$ART/monitor.out" 2>&1 || true
@@ -289,6 +378,14 @@ v6_monitor() {
 
 # ── §7 cron ──────────────────────────────────────────────────────────────────
 s7_cron_setup() {
+    narrate "§7  cron — 매분 자동 실행 등록" \
+"운영 상태는 스냅샷이 아니라 시계열이어야 분석 가능. cron 으로 강제한다.
+  • crontab 한 줄: '* * * * * monitor.sh ...'
+    별표 5개 = 분 / 시 / 일 / 월 / 요일. 다 * 면 '매분(모든 시각)'.
+  • cron 은 .bashrc 를 읽지 않으므로 환경변수를 명령줄 앞에 직접 명시
+    (AGENT_HOME=... AGENT_PORT=... 형태).
+  • 실행 계정은 agent-admin — agent-core 그룹이라 로그 디렉토리 쓰기 가능.
+  • 검증: 등록 직후 라인 수 기록 → 70초 대기 → 라인 수 증가 확인."
     section "§7  cron — register every-minute job"
     msh "sudo systemctl enable --now cron
          sudo -u agent-admin bash -c '

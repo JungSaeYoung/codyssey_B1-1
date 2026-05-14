@@ -2,9 +2,10 @@
 # demo.sh — macOS + OrbStack 에서 미션 전체를 시연용으로 한 번에 돌린다.
 #
 # 사용법:
-#   ./demo.sh              # 깨끗한 머신을 새로 만들어 처음부터 시연 (권장)
+#   ./demo.sh              # 깨끗한 머신 + 시연 모드(섹션마다 엔터 대기)
 #   ./demo.sh --keep       # 기존 머신 재사용
 #   ./demo.sh --shell      # 시연 끝나고 머신 안 셸로 자동 진입
+#   ./demo.sh --fast       # 시연 모드 끄고 한 번에 자동 실행 (CI 처럼)
 #
 # 전제:
 #   - macOS
@@ -17,12 +18,14 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 # ── 옵션 파싱 ────────────────────────────────────────────────────────────────
 KEEP=0
 ENTER_SHELL=0
+NARRATE_MODE=1
 for arg in "$@"; do
     case "$arg" in
         --keep)  KEEP=1 ;;
         --shell) ENTER_SHELL=1 ;;
+        --fast)  NARRATE_MODE=0 ;;
         --help|-h)
-            sed -n '2,12p' "$0"
+            sed -n '2,13p' "$0"
             exit 0 ;;
         *) echo "unknown option: $arg" >&2; exit 1 ;;
     esac
@@ -75,7 +78,25 @@ ${B}시연 흐름${R}
   ${D}4.${R} 결과 산출물(.verify-artifacts/) 을 Finder 로 자동 오픈
   ${D}5.${R} (옵션) --shell 이면 머신 셸로 들어가서 직접 둘러볼 수 있다
 
-${D}예상 소요 시간: 약 2~3분 (대부분 cron 70초 대기)${R}
+${B}시연 모드${R} (NARRATE_MODE=$NARRATE_MODE)
+EOF
+
+if [[ "$NARRATE_MODE" == "1" ]]; then
+    cat <<EOF
+  ${G}● 켜짐${R} — 각 섹션 시작 전 ${Y}노란 박스${R}로 설명이 표시되고 ${B}엔터 대기${R}.
+            엔터→ 명령 실행, ${B}s${R}+엔터→ 그 섹션 건너뛰기, ${B}q${R}+엔터→ 종료.
+            발표하면서 한 단계씩 보여주기에 적합.
+EOF
+else
+    cat <<EOF
+  ${C}● 꺼짐${R} — 일시정지 없이 한 번에 끝까지 실행 (--fast 모드).
+            CI 처럼 결과만 빠르게 보고 싶을 때.
+EOF
+fi
+
+cat <<EOF
+
+${D}예상 소요 시간: 시연 모드 ON 이면 발표자 호흡에 따라, OFF 이면 약 2~3분${R}
 
 EOF
 
@@ -86,8 +107,9 @@ export MACHINE_NAME="codyssey-demo"
 if [[ "$KEEP" == "0" ]]; then
     export FRESH=1
 fi
+export NARRATE="$NARRATE_MODE"
 
-banner "▶ verify_orbstack.sh 실행 (MACHINE_NAME=$MACHINE_NAME, FRESH=${FRESH:-0})"
+banner "▶ verify_orbstack.sh 실행 (MACHINE_NAME=$MACHINE_NAME, FRESH=${FRESH:-0}, NARRATE=$NARRATE)"
 ./verify_orbstack.sh
 
 # ── 결과 안내 + Finder 열기 ──────────────────────────────────────────────────
