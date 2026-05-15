@@ -114,10 +114,51 @@ banner "▶ verify_orbstack.sh 실행 (MACHINE_NAME=$MACHINE_NAME, FRESH=${FRESH
 
 # ── 결과 안내 + Finder 열기 ──────────────────────────────────────────────────
 ART_DIR="$(pwd)/.verify-artifacts"
-banner "✅ 시연 완료 — 산출물 위치"
-printf "  %s\n" "$ART_DIR"
+banner "✅ 시연 완료 — 산출물 안내"
+printf "  📁  %s\n" "$ART_DIR"
 printf "\n${D}파일 목록:${R}\n"
-ls -l "$ART_DIR" 2>/dev/null | sed 's/^/    /'
+ls -lh "$ART_DIR" 2>/dev/null | sed 's/^/    /'
+
+# 각 파일의 의미·용도 설명
+cat <<EOF
+
+${B}산출물 설명${R}
+
+  ${C}📄 evidence.txt${R}        ${D}— 채점·제출용 종합 증거 (가장 중요)${R}
+      § 1.3 ss -tulnp           : 20022 / 15034 LISTEN 확인
+      § 2   ufw status verbose  : 화이트리스트 정책 적용 상태
+      § 3   id agent-{admin,dev,test} : 소속 그룹 검증
+      § 4   ls -ld + getfacl x3 : 디렉토리 권한 + default ACL
+      § 7   crontab -u agent-admin -l : cron 등록 내역
+      § 7   monitor.log tail -n5: 최근 5분간 cron 누적 결과
+      → 미션의 ${B}'필수 증거 자료 체크리스트'${R} 항목들이 한 파일에 모여 있음.
+
+  ${C}📄 agent.out${R}           ${D}— § 5  Boot Sequence 캡처${R}
+      Starting Agent Boot Sequence... + [1/5]~[5/5] [OK] + 'Agent READY'
+      → 앱이 일반 계정으로 정상 부팅됐다는 증거.
+
+  ${C}📄 monitor.out${R}         ${D}— § 6  monitor.sh 수동 실행 결과${R}
+      ====== SYSTEM MONITOR RESULT ======
+      [HEALTH CHECK]  [RESOURCE MONITORING]  ([WARNING] 임계값 초과 시)
+      [INFO] Log appended: /var/log/agent-app/monitor.log
+      → 자동화 스크립트가 의도대로 동작했다는 증거.
+
+  ${C}📄 run.log${R}             ${D}— 시연 전체 실행 로그 (트러블슈팅용)${R}
+      verify_orbstack.sh 전 구간의 출력. 색상 코드 포함이라 'less -R' 권장.
+      → 어디서 ✗ 났는지, 어떤 명령이 어떤 출력을 냈는지 사후 분석.
+
+${B}제출 시 권장 동선${R}
+  1. .verify-artifacts/ 폴더 자체를 zip 으로 묶거나
+  2. evidence.txt + agent.out + monitor.out 3개만 골라 첨부
+  3. 요구사항_수행_내역서.md 의 각 § 출력 자리에 위 파일 내용을 붙여 넣어도 됨
+
+${B}빠르게 다시 보고 싶다면${R}
+  cat $ART_DIR/evidence.txt
+  cat $ART_DIR/agent.out
+  cat $ART_DIR/monitor.out
+  less -R $ART_DIR/run.log
+
+EOF
 
 # Finder 자동 오픈
 if command -v open >/dev/null 2>&1; then
