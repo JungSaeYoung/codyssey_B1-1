@@ -59,6 +59,10 @@ sudo ufw default allow outgoing
 sudo ufw allow 20022/tcp comment 'SSH'
 sudo ufw allow 15034/tcp comment 'AGENT APP'
 sudo ufw --force enable
+# systemd unit 도 명시적으로 활성화 (OrbStack 같은 환경에선 ufw enable 만으로
+# unit 이 활성화되지 않을 수 있어 monitor.sh 의 일반사용자 방화벽 체크가
+# 거짓 음성을 낼 수 있음)
+sudo systemctl enable --now ufw
 sudo ufw status verbose
 
 # 참고: OrbStack 호스트(macOS)와 머신 사이의 포트 노출은 OrbStack 이 자동 처리한다.

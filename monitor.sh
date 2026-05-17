@@ -62,9 +62,15 @@ echo ""
 # 2) 상태 점검 (경고만)
 # ────────────────────────────────────────────────────────────────────────────
 FIREWALL_OK="N"
-# systemctl is-active 는 root 권한 없이도 동작하므로 cron(agent-admin)에서도 정확.
-# `ufw status` 는 root 가 아니면 거부되어 잘못된 WARNING 을 유발.
+# 방화벽 활성 여부 판단 — 일반 사용자(agent-admin/cron) 에서도 sudo 없이 동작해야 함.
+#   1) systemd unit 활성: 정석적 방법
+#   2) /etc/ufw/ufw.conf 의 ENABLED=yes: OrbStack 등 일부 환경에서 ufw 룰은
+#      적용됐지만 systemd unit 이 inactive 로 잡히는 케이스를 위한 fallback
+#      (이 파일은 기본 644 라 일반 사용자도 read 가능)
+#   3) firewalld 도 같은 식으로 확인
 if systemctl is-active --quiet ufw 2>/dev/null; then
+    FIREWALL_OK="Y"
+elif [ -r /etc/ufw/ufw.conf ] && grep -qE '^ENABLED=yes' /etc/ufw/ufw.conf 2>/dev/null; then
     FIREWALL_OK="Y"
 elif systemctl is-active --quiet firewalld 2>/dev/null; then
     FIREWALL_OK="Y"

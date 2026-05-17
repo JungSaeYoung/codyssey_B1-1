@@ -186,11 +186,14 @@ s2_ufw() {
     'ufw allow 20022/tcp'. 같은 netfilter 룰을 만든다.
   • 결과: 우리가 의도한 두 포트 외 어떤 연결도 막힌다 = 공격 표면 최소화."
     section "§2  UFW — allow 20022/15034 only"
+    # systemd unit 까지 명시적으로 enable/start — OrbStack 등 일부 환경에선
+    # `ufw enable` 만으로 systemd unit 이 활성화되지 않는 경우가 있어 보강.
     msh "sudo ufw default deny  incoming
          sudo ufw default allow outgoing
          sudo ufw allow 20022/tcp comment 'SSH'
          sudo ufw allow 15034/tcp comment 'AGENT APP'
-         sudo ufw --force enable"
+         sudo ufw --force enable
+         sudo systemctl enable --now ufw"
 }
 v2_ufw() {
     out="$(msh_q 'sudo ufw status verbose')"
