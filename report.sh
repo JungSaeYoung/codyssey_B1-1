@@ -19,7 +19,9 @@ fi
 # 로그 라인 포맷:
 # [YYYY-MM-DD HH:MM:SS] PID:1234 CPU:25.3% MEM:5.2% DISK_USED:23%
 # AWK로 시작/종료 시각 필터 + 통계 계산
-awk -v START="${START_TS}" -v END="${END_TS}" '
+# ※ 변수명에 'END' / 'START' 를 쓰면 일부 awk(예: mawk) 가 BEGIN/END 키워드와 충돌해
+#   "cannot command line assign to END" 에러가 난다. 그래서 ts_start / ts_end 로 사용.
+awk -v ts_start="${START_TS}" -v ts_end="${END_TS}" '
 function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
 
 {
@@ -29,8 +31,8 @@ function trim(s) { sub(/^[ \t]+/, "", s); sub(/[ \t]+$/, "", s); return s }
     } else { next }
 
     # 구간 필터
-    if (START != "" && ts < START) next
-    if (END   != "" && ts > END)   next
+    if (ts_start != "" && ts < ts_start) next
+    if (ts_end   != "" && ts > ts_end)   next
 
     # 값 추출
     cpu = ""; mem = ""; disk = ""
