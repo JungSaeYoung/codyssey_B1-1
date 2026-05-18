@@ -11,7 +11,8 @@
 #
 # 사전 요구:
 #   - OrbStack 설치 (`brew install orbstack` + 첫 실행)
-#   - 이 디렉토리에 monitor.sh / report.sh / archive_logs.sh / agent-app (바이너리) 존재
+#   - 이 디렉토리에 src/{monitor,report,archive_logs}.sh 와
+#     bin/agent-app 존재
 # ─────────────────────────────────────────────────────────────────────────────
 
 set -euo pipefail
@@ -65,8 +66,23 @@ narrate() {
     fi
 }
 
+# ── OrbStack 업데이트 알림 억제 ────────────────────────────────────────────
+# orb CLI 는 호출 시마다 "OrbStack X.Y.Z 업데이트가 있습니다" 같은 안내를 출력해
+# 시연 화면을 어지럽힐 수 있다. 알려진 환경변수를 모두 set 해두고, 그래도 새는
+# 안내 줄은 sed 필터로 제거한다.
+export ORBSTACK_NO_UPDATE_CHECK=1
+export ORB_NO_UPDATE_CHECK=1
+export ORB_DISABLE_UPDATE_NOTIFY=1
+export DO_NOT_TRACK=1
+
+# orb 출력에서 업데이트 안내로 보이는 줄들을 제거하는 필터.
+# (대소문자 무시, 'update available' / 'new version' / 'orbstack ... is available' 패턴)
+_orb_clean() {
+    sed -E '/(update available|new version|orbstack [0-9]+\.[0-9]+\.[0-9]+ is available|run .*to update.*orbstack)/Id'
+}
+
 # ── 머신 명령 실행 ────────────────────────────────────────────────────────────
-mrun()  { orb -m "$MACHINE" "$@" 2>&1 | tee -a "$LOG"; }
+mrun()  { orb -m "$MACHINE" "$@" 2>&1 | _orb_clean | tee -a "$LOG"; }
 
 # NARRATE 모드에서 어떤 명령을 보냈는지 보이도록 미리 출력하는 헬퍼.
 # 멀티라인 스크립트도 줄마다 '│' 로 prefix 해서 가독성 ↑.
@@ -84,7 +100,7 @@ _show_cmd() {
 # 머신 안에서 명령 실행. NARRATE 면 명령 자체를 먼저 보여주고, 그 다음 실시간 출력을 흘림.
 msh() {
     _show_cmd "$1"
-    orb -m "$MACHINE" bash -lc "$1" 2>&1 | tee -a "$LOG"
+    orb -m "$MACHINE" bash -lc "$1" 2>&1 | _orb_clean | tee -a "$LOG"
 }
 
 # 출력 캡처용. NARRATE 면 stderr 로 '무엇을 검사하는지' 만 살짝 보여줌
@@ -93,14 +109,15 @@ msh_q() {
     if [[ "${NARRATE:-0}" == "1" ]]; then
         printf "${c_dim}┄ check\$ %s${c_reset}\n" "$1" >&2
     fi
-    orb -m "$MACHINE" bash -lc "$1"
+    orb -m "$MACHINE" bash -lc "$1" | _orb_clean
 }
 
 # ── 사전 점검 ────────────────────────────────────────────────────────────────
 preflight() {
     section "Preflight"
     command -v orb >/dev/null 2>&1 || die "orb CLI not found. Install OrbStack first."
-    for f in monitor.sh report.sh archive_logs.sh agent-app; do
+    for f in src/monitor.sh src/report.sh \
+             src/archive_logs.sh bin/agent-app; do
         [[ -f "$WORKDIR/$f" ]] || die "missing $WORKDIR/$f"
     done
     ok "orb CLI present, all source files exist"
@@ -320,11 +337,11 @@ EOF'"
          sudo chmod 640 /home/agent-admin/agent-app/api_keys/t_secret.key"
 
     # CRLF 정리 + 배포 (OrbStack 자동 마운트로 macOS 경로 직접 사용)
-    msh "sudo dos2unix '$WORKDIR/monitor.sh' '$WORKDIR/report.sh' '$WORKDIR/archive_logs.sh' 2>/dev/null || true
-         sudo install -m 0750 -o agent-admin -g agent-common '$WORKDIR/agent-app'      /home/agent-admin/agent-app/agent-app
-         sudo install -m 0750 -o agent-dev   -g agent-core   '$WORKDIR/monitor.sh'     /home/agent-admin/agent-app/bin/monitor.sh
-         sudo install -m 0750 -o agent-dev   -g agent-core   '$WORKDIR/report.sh'      /home/agent-admin/agent-app/bin/report.sh
-         sudo install -m 0750 -o agent-dev   -g agent-core   '$WORKDIR/archive_logs.sh' /home/agent-admin/agent-app/bin/archive_logs.sh"
+    msh "sudo dos2unix '$WORKDIR/src/monitor.sh' '$WORKDIR/src/report.sh' '$WORKDIR/src/archive_logs.sh' 2>/dev/null || true
+         sudo install -m 0750 -o agent-admin -g agent-common '$WORKDIR/bin/agent-app'         /home/agent-admin/agent-app/agent-app
+         sudo install -m 0750 -o agent-dev   -g agent-core   '$WORKDIR/src/monitor.sh'        /home/agent-admin/agent-app/bin/monitor.sh
+         sudo install -m 0750 -o agent-dev   -g agent-core   '$WORKDIR/src/report.sh'         /home/agent-admin/agent-app/bin/report.sh
+         sudo install -m 0750 -o agent-dev   -g agent-core   '$WORKDIR/src/archive_logs.sh'   /home/agent-admin/agent-app/bin/archive_logs.sh"
 }
 
 s5_app_run() {

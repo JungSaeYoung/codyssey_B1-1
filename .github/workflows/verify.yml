@@ -182,16 +182,17 @@ EOF
             chown agent-admin:agent-core /home/agent-admin/agent-app/api_keys/t_secret.key
             chmod 640 /home/agent-admin/agent-app/api_keys/t_secret.key
 
-            # Deploy app + scripts from checkout
-            dos2unix /work/monitor.sh /work/report.sh /work/archive_logs.sh 2>/dev/null || true
+            # Deploy app + scripts from checkout (scripts/{bin,src} layout)
+            dos2unix /work/src/monitor.sh /work/src/report.sh \
+                     /work/src/archive_logs.sh 2>/dev/null || true
             install -m 0750 -o agent-admin -g agent-common \
-              /work/agent-app /home/agent-admin/agent-app/agent-app
+              /work/bin/agent-app           /home/agent-admin/agent-app/agent-app
             install -m 0750 -o agent-dev   -g agent-core \
-              /work/monitor.sh  /home/agent-admin/agent-app/bin/monitor.sh
+              /work/src/monitor.sh          /home/agent-admin/agent-app/bin/monitor.sh
             install -m 0750 -o agent-dev   -g agent-core \
-              /work/report.sh   /home/agent-admin/agent-app/bin/report.sh
+              /work/src/report.sh           /home/agent-admin/agent-app/bin/report.sh
             install -m 0750 -o agent-dev   -g agent-core \
-              /work/archive_logs.sh /home/agent-admin/agent-app/bin/archive_logs.sh
+              /work/src/archive_logs.sh     /home/agent-admin/agent-app/bin/archive_logs.sh
           '
 
       - name: "§5  Run agent-app & boot-check"

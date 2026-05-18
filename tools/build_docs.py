@@ -2,9 +2,9 @@
 """
 build_docs.py — 프로젝트의 모든 .md 파일을 단일 HTML 사이트로 빌드한다.
 
-결과:  ./docs/index.html  (단일 파일, 더블클릭으로 열림)
+결과:  ./docs/html/index.html  (단일 파일, 더블클릭으로 열림)
 의존:  pip install markdown pygments
-실행:  python3 build_docs.py [--no-open]
+실행:  python3 tools/build_docs.py [--no-open]
 """
 
 from __future__ import annotations
@@ -18,16 +18,20 @@ from markdown.extensions.codehilite import CodeHiliteExtension
 from markdown.extensions.toc import TocExtension
 from pygments.formatters import HtmlFormatter
 
-ROOT = Path(__file__).resolve().parent
-OUT_DIR = ROOT / "docs"
+# 이 파일은 tools/ 아래에 있으므로 한 단계 더 올라가야 프로젝트 루트가 된다.
+ROOT = Path(__file__).resolve().parent.parent
+MD_DIR = ROOT / "docs" / "md"
+OUT_DIR = ROOT / "docs" / "html"
 OUT = OUT_DIR / "index.html"
 
-# 표시 제목 | 파일 경로  ─ 순서 유지
+# (표시 제목, 파일 경로) — 순서 유지
+# README.md 는 루트, 나머지는 docs/md/ 에 위치
 DOCS = [
-    ("README", "README.md"),
-    ("요구사항 수행 내역서", "요구사항_수행_내역서.md"),
-    ("문제 설명", "문제_설명.md"),
-    ("스크립트 설명", "스크립트_설명.md"),
+    ("README",                  ROOT / "README.md"),
+    ("요구사항 수행 내역서",    MD_DIR / "요구사항_수행_내역서.md"),
+    ("문제 설명",                MD_DIR / "문제_설명.md"),
+    ("스크립트 설명",            MD_DIR / "스크립트_설명.md"),
+    ("agent-app 리버스 엔지니어링", MD_DIR / "agent-app_리버스엔지니어링.md"),
 ]
 
 
@@ -50,18 +54,19 @@ def render_doc(file_path: Path):
 
 
 def build():
-    OUT_DIR.mkdir(exist_ok=True)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     docs_data = []
-    for title, fname in DOCS:
-        f = ROOT / fname
+    for title, f in DOCS:
         if not f.exists():
-            print(f"  ! skip: {fname} (not found)")
+            print(f"  ! skip: {f} (not found)")
             continue
         html, toc = render_doc(f)
+        # 파일 경로를 ROOT 기준 상대 경로로 — 내부 .md 링크 라우팅에 사용
+        rel = f.relative_to(ROOT).as_posix()
         docs_data.append({
             "title": title,
-            "file": fname,
+            "file": rel,
             "html": html,
             "toc": toc,
         })
@@ -349,10 +354,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       toc.innerHTML = `<div class="toc-list">${{d.toc || ''}}</div>`;
 
       // 내부 .md 링크를 SPA 라우팅으로
+      // README.md 는 docs/md/xxx.md 로 가리키고, docs/md 안의 .md 들은 서로
+      // 짧은 이름(xxx.md) 으로 가리킬 수 있다. basename 비교로 둘 다 매칭.
+      const basename = (p) => (p || '').split('/').pop();
       content.querySelectorAll('a[href$=".md"], a[href*=".md#"]').forEach(a => {{
         const href = a.getAttribute('href');
         const filePart = href.replace(/#.*$/, '');
-        const idx = DOCS.findIndex(x => x.file === filePart);
+        const fBase = basename(filePart);
+        const idx = DOCS.findIndex(x => basename(x.file) === fBase);
         if (idx >= 0) {{
           a.onclick = (e) => {{ e.preventDefault(); loadDoc(idx); }};
           a.style.cursor = 'pointer';

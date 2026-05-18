@@ -20,17 +20,61 @@
 
 ---
 
-## 2. 최종 산출물
+## 2. 디렉토리 구조
+
+```
+codyssey_B1-1/
+├── README.md                       ← 이 파일 (루트 유지)
+│
+├── docs/
+│   ├── md/                                ← 원본 .md 문서들
+│   │   ├── 요구사항_수행_내역서.md       ← 제출용 문서 (필수)
+│   │   ├── 문제_설명.md                  ← 평가문항 답변 정리
+│   │   ├── 스크립트_설명.md              ← bash 입문자용 해설
+│   │   └── agent-app_리버스엔지니어링.md ← 바이너리 정적 분석 학습용 (선택)
+│   └── html/
+│       └── index.html                    ← tools/build_docs.py 가 생성한 정적 사이트
+│
+├── bin/
+│   └── agent-app                   ← 운영 측 제공 Linux 바이너리 (Ubuntu 24.04 전용)
+├── src/
+│   ├── monitor.sh                  ← 시스템 상태 수집·로깅 (필수 산출물)
+│   ├── report.sh                   ← 로그 분석 리포트 (보너스 1)
+│   ├── archive_logs.sh             ← 시간 기반 로그 보존 (보너스 2)
+│   │
+│   ├── 00_run_all.sh               ← 01~07 setup 단계를 한 번에 실행 (wrapper)
+│   ├── 01_ssh_hardening.sh         ← SSH 포트 20022 + Root 차단
+│   ├── 02_firewall_allowlist.sh    ← UFW 화이트리스트 (20022/15034)
+│   ├── 03_users_and_groups.sh      ← 계정 3종 + 그룹 2종
+│   ├── 04_directories_and_acl.sh   ← 디렉토리 + ACL (default 상속 포함)
+│   ├── 05_env_and_keyfile.sh       ← 환경변수 5종 + API 키 파일
+│   ├── 06_deploy_app_and_scripts.sh ← agent-app + *.sh 배포
+│   └── 07_cron_schedule.sh         ← cron 매분/매일 등록
+│
+├── demo.sh                         ← 시연 자동화 (시연 모드)
+├── verify_orbstack.sh              ← OrbStack 기반 자동 검증
+│
+├── tools/                          ← 분석 / 문서 빌드 도구 (학습용)
+│   ├── build_docs.py               ← docs/md/*.md + README.md → docs/html/index.html
+│   ├── analyze_binary.py           ← agent-app ELF / PyInstaller 정적 분석
+│   ├── extract_pyinstaller.py      ← PyInstaller 번들 추출
+│   ├── decompile_metadata.py       ← .pyc code object 메타데이터 재귀 덤프
+│   └── disasm_pyc.py               ← dis 모듈 기반 바이트코드 분해
+│
+└── .github/workflows/verify.yml    ← GitHub Actions 자동 검증
+```
+
+## 3. 최종 산출물
 
 | # | 산출물 | 비고 |
 | - | ------ | ---- |
-| 1 | [요구사항_수행_내역서.md](요구사항_수행_내역서.md) | 설정/명령어/검증 출력을 모은 제출 문서 |
-| 2 | [monitor.sh](monitor.sh) | 시스템 상태 수집 + 로깅 (필수) |
-| 3 | [report.sh](report.sh) | 로그 분석 리포트 (보너스 1) |
-| 4 | [archive_logs.sh](archive_logs.sh) | 시간 기반 로그 보존 정책 (보너스 2) |
-| 5 | [setup_commands.sh](setup_commands.sh) | 환경 구축 명령어 모음 (OrbStack 절차 포함) |
-| 6 | `agent-app` | 미션 측이 제공하는 Linux 바이너리 (Ubuntu 24.04 전용). 학습자가 만들지 않음 |
-| 7 | [스크립트_설명.md](스크립트_설명.md) | bash 입문자용 스크립트 해설 |
+| 1 | [요구사항_수행_내역서.md](docs/md/요구사항_수행_내역서.md) | 설정/명령어/검증 출력을 모은 제출 문서 |
+| 2 | [src/monitor.sh](src/monitor.sh) | 시스템 상태 수집 + 로깅 (필수) |
+| 3 | [src/report.sh](src/report.sh) | 로그 분석 리포트 (보너스 1) |
+| 4 | [src/archive_logs.sh](src/archive_logs.sh) | 시간 기반 로그 보존 정책 (보너스 2) |
+| 5 | [src/00_run_all.sh](src/00_run_all.sh) ~ [src/07_cron_schedule.sh](src/07_cron_schedule.sh) | 환경 구축 7단계 스크립트 (각 단계 분리, 번호 순서대로 실행) |
+| 6 | `bin/agent-app` | 미션 측이 제공하는 Linux 바이너리 (Ubuntu 24.04 전용). 학습자가 만들지 않음 |
+| 7 | [스크립트_설명.md](docs/md/스크립트_설명.md) | bash 입문자용 스크립트 해설 |
 
 ---
 
@@ -158,18 +202,48 @@ $AGENT_HOME                          (= /home/agent-admin/agent-app)
 # macOS 호스트
 brew install orbstack
 orb create ubuntu:24.04 codyssey
-orb push -m codyssey ./*.sh ./agent-app /tmp/
+orb push -m codyssey src/*.sh bin/agent-app /tmp/   # 01~07 + monitor/report/archive + 바이너리
 orb shell -m codyssey
 
 # 머신 내부 (Windows 작성 파일이면 CRLF 정리)
 sudo apt-get install -y dos2unix
 dos2unix /tmp/*.sh && chmod +x /tmp/*.sh
 
-# 이후 setup_commands.sh 의 [1]~[7] 섹션을 순서대로 실행
-bash /tmp/setup_commands.sh   # 또는 섹션별로 발췌 실행
+# 이후 01~07 setup 스크립트를 순서대로 실행
+bash /tmp/00_run_all.sh           # 한 번에 (권장)
+# 또는 단계별로 직접 확인하며:
+bash /tmp/01_ssh_hardening.sh
+bash /tmp/02_firewall_allowlist.sh
+# ...
+bash /tmp/07_cron_schedule.sh
 ```
 
-검증 체크리스트는 [요구사항_수행_내역서.md](요구사항_수행_내역서.md) 마지막 절 참고.
+검증 체크리스트는 [요구사항_수행_내역서.md](docs/md/요구사항_수행_내역서.md) 마지막 절 참고.
+
+### OrbStack 업데이트 알림 끄기 (선택)
+
+`orb` 명령마다 "OrbStack X.Y.Z 업데이트 가능" 안내가 떠 시연에 거슬리는 경우 한 가지 이상의 방법으로 비활성화 가능.
+
+**A) macOS 셸 프로파일에 영구 등록 (권장)**
+
+```bash
+# zsh 사용자
+echo 'export ORBSTACK_NO_UPDATE_CHECK=1' >> ~/.zshrc
+echo 'export ORB_NO_UPDATE_CHECK=1'      >> ~/.zshrc
+
+# bash 사용자
+echo 'export ORBSTACK_NO_UPDATE_CHECK=1' >> ~/.bashrc
+
+source ~/.zshrc   # 또는 새 터미널 열기
+```
+
+**B) OrbStack 앱 자체 설정**
+
+OrbStack 메뉴바 아이콘 → **Settings** → **System** → **Software Update** 에서 "Check for updates automatically" 체크 해제.
+
+**C) 본 저장소 스크립트 사용 시**
+
+`demo.sh` / `verify_orbstack.sh` 안에서 위 환경변수를 자동 set 하고, 새는 안내 줄은 `sed` 필터로 제거하도록 처리해 두었음 → 별도 작업 불필요.
 
 ---
 

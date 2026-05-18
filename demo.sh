@@ -10,10 +10,17 @@
 # 전제:
 #   - macOS
 #   - OrbStack 이미 설치 + 한 번 이상 실행됨 (`brew install orbstack`)
-#   - 이 디렉토리에 monitor.sh / report.sh / archive_logs.sh / agent-app 존재
+#   - 이 디렉토리에 src/{monitor,report,archive_logs}.sh 와
+#     bin/agent-app 존재
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
+
+# ── OrbStack 업데이트 알림 억제 (verify_orbstack.sh 에서도 다시 설정함) ──────
+export ORBSTACK_NO_UPDATE_CHECK=1
+export ORB_NO_UPDATE_CHECK=1
+export ORB_DISABLE_UPDATE_NOTIFY=1
+export DO_NOT_TRACK=1
 
 # ── 옵션 파싱 ────────────────────────────────────────────────────────────────
 KEEP=0
@@ -53,7 +60,8 @@ command -v orb >/dev/null 2>&1 || {
     printf "    brew install orbstack && open -a OrbStack\n"
     exit 1
 }
-for f in monitor.sh report.sh archive_logs.sh agent-app verify_orbstack.sh; do
+for f in src/monitor.sh src/report.sh src/archive_logs.sh \
+         bin/agent-app verify_orbstack.sh; do
     if [[ ! -f "$f" ]]; then
         printf "${Y}⚠ 필요한 파일이 없다: %s${R}\n" "$f"
         exit 1
@@ -62,7 +70,9 @@ done
 
 # Windows/zip 경유로 옮긴 경우 실행 비트(x)가 빠져 있을 수 있다.
 # 셸 스크립트와 바이너리에 실행 권한을 보장한다.
-chmod +x verify_orbstack.sh monitor.sh report.sh archive_logs.sh agent-app 2>/dev/null || true
+chmod +x verify_orbstack.sh \
+         src/monitor.sh src/report.sh src/archive_logs.sh \
+         bin/agent-app 2>/dev/null || true
 
 printf "${G}✓ macOS + orb CLI + 소스 파일 모두 준비됨${R}\n"
 
