@@ -317,6 +317,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 <body>
   <button id="menu-btn" aria-label="menu">☰</button>
   <div class="controls">
+    <button class="ctl-btn" id="back-btn" onclick="goBack()" hidden>← 뒤로</button>
     <button class="ctl-btn" id="theme-btn" onclick="toggleTheme()">
       <span id="theme-icon">🌙</span><span id="theme-label">Dark</span>
     </button>
@@ -339,11 +340,15 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     function renderNav() {{
       const nav = document.getElementById('nav-list');
       nav.innerHTML = DOCS.map((d, i) =>
-        `<li><a href="#" data-i="${{i}}" onclick="loadDoc(${{i}});return false;">${{d.title}}</a></li>`
+        `<li><a href="#" data-i="${{i}}" onclick="navigateTo(${{i}});return false;">${{d.title}}</a></li>`
       ).join('');
     }}
 
-    function loadDoc(i) {{
+    let currentDoc = 0;
+
+    function render(i, anchor, scrollY) {{
+      if (typeof i !== 'number' || !DOCS[i]) i = currentDoc;   // 잘못된 인덱스 방어
+      currentDoc = i;
       const d = DOCS[i];
       const meta = `<p class="doc-meta">원본: <code>${{d.file}}</code></p>`;
       const content = document.getElementById('content');
@@ -353,34 +358,74 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       const toc = document.getElementById('toc');
       toc.innerHTML = `<div class="toc-list">${{d.toc || ''}}</div>`;
 
-      // 내부 .md 링크를 SPA 라우팅으로
-      // README.md 는 docs/md/xxx.md 로 가리키고, docs/md 안의 .md 들은 서로
-      // 짧은 이름(xxx.md) 으로 가리킬 수 있다. basename 비교로 둘 다 매칭.
+      // 내부 .md(#anchor) 링크를 SPA 라우팅으로 (basename 비교)
       const basename = (p) => (p || '').split('/').pop();
       content.querySelectorAll('a[href$=".md"], a[href*=".md#"]').forEach(a => {{
         const href = a.getAttribute('href');
-        const filePart = href.replace(/#.*$/, '');
-        const fBase = basename(filePart);
-        const idx = DOCS.findIndex(x => basename(x.file) === fBase);
+        const hashIdx = href.indexOf('#');
+        const filePart = hashIdx >= 0 ? href.slice(0, hashIdx) : href;
+        const linkAnchor = hashIdx >= 0 ? href.slice(hashIdx + 1) : null;
+        const idx = DOCS.findIndex(x => basename(x.file) === basename(filePart));
         if (idx >= 0) {{
-          a.onclick = (e) => {{ e.preventDefault(); loadDoc(idx); }};
+          a.onclick = (e) => {{ e.preventDefault(); navigateTo(idx, linkAnchor); }};
           a.style.cursor = 'pointer';
         }}
+      }});
+
+      // 문서 내부 #앵커(각주 ref/backref 등)는 히스토리를 더럽히지 않고 스크롤만
+      content.querySelectorAll('a[href^="#"]').forEach(a => {{
+        a.addEventListener('click', (e) => {{
+          const t = document.getElementById(a.getAttribute('href').slice(1));
+          if (t) {{ e.preventDefault(); t.scrollIntoView({{ behavior: 'auto', block: 'start' }}); }}
+        }});
       }});
 
       // 활성 nav 표시
       document.querySelectorAll('#nav-list a').forEach(a =>
         a.classList.toggle('active', parseInt(a.dataset.i) === i)
       );
-
-      // 모바일에서 사이드바 닫기
       document.getElementById('sidebar').classList.remove('open');
-      window.scrollTo(0, 0);
-      localStorage.setItem('lastDoc', i);
 
-      // 스크롤 스파이용 헤딩 인덱싱
+      // 스크롤 복원 우선순위: scrollY(뒤로가기) > anchor(문서 내 점프) > 맨 위.
+      const doScroll = () => {{
+        if (typeof scrollY === 'number' && scrollY > 0) {{
+          window.scrollTo(0, scrollY);
+        }} else if (anchor) {{
+          const el = document.getElementById(anchor);
+          if (el) el.scrollIntoView({{ behavior: 'auto', block: 'start' }});
+          else window.scrollTo(0, 0);
+        }} else {{
+          window.scrollTo(0, 0);
+        }}
+      }};
+      requestAnimationFrame(() => requestAnimationFrame(doScroll));
+
+      localStorage.setItem('lastDoc', i);
       collectSpyTargets();
     }}
+
+    // ── SPA 네비게이션 + 히스토리(뒤로가기) ───────────────────────────
+    // history API 를 단일 소스로: pushState 로 이동하고, popstate(브라우저 뒤로가기/
+    // 우상단 '← 뒤로' 버튼)에서 떠날 때 저장한 scrollY 로 "보던 위치" 를 복원한다.
+    function curDepth() {{ return (history.state && history.state.depth) || 0; }}
+    function navigateTo(i, anchor) {{
+      history.replaceState(
+        Object.assign({{}}, history.state, {{ scrollY: window.scrollY }}), '');
+      const depth = curDepth() + 1;
+      history.pushState({{ i: i, anchor: anchor || null, scrollY: 0, depth: depth }}, '');
+      render(i, anchor, 0);
+      updateBackBtn();
+    }}
+    function goBack() {{ history.back(); }}
+    function updateBackBtn() {{
+      const btn = document.getElementById('back-btn');
+      if (btn) btn.hidden = curDepth() <= 0;
+    }}
+    window.addEventListener('popstate', (e) => {{
+      const st = e.state || {{}};
+      render(typeof st.i === 'number' ? st.i : currentDoc, st.anchor, st.scrollY || 0);
+      updateBackBtn();
+    }});
 
     let spyTargets = [];
     function collectSpyTargets() {{
@@ -422,8 +467,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       document.getElementById('menu-btn').onclick = () =>
         document.getElementById('sidebar').classList.toggle('open');
       renderNav();
+      if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
       const last = parseInt(localStorage.getItem('lastDoc') || '0');
-      loadDoc(isNaN(last) || last >= DOCS.length ? 0 : last);
+      const start = (isNaN(last) || last >= DOCS.length) ? 0 : last;
+      history.replaceState({{ i: start, anchor: null, scrollY: 0, depth: 0 }}, '');
+      render(start, null, 0);
+      updateBackBtn();
     }})();
   </script>
 </body>

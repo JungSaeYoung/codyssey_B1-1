@@ -52,7 +52,7 @@ Layer 7  바이트코드 디컴파일       ← pyinstxtractor + uncompyle6
 
 ### 도구
 
-- `file` — magic bytes 로 1차 분류
+- `file` — magic bytes 로 1차 분류[^1]
 - `xxd` / `hexdump` / Python `open(...).read(64)` — 헤더 직접 확인
 
 ### 실행
@@ -72,7 +72,7 @@ bin/agent-app: ELF 64-bit LSB executable, x86-64, version 1 (SYSV),
 | ELF 64-bit | ✓ | 리눅스용 실행 파일 |
 | x86-64 | ✓ | 인텔/AMD 64비트 (Apple Silicon 직접 실행 불가, Rosetta 필요) |
 | dynamically linked | ✓ | 라이브러리를 런타임에 동적 로드 (단독 실행 X) |
-| interpreter /lib64/ld-linux-x86-64.so.2 | ✓ | glibc 동적 링커 사용 |
+| interpreter /lib64/ld-linux-x86-64.so.2 | ✓ | glibc 동적 링커 사용[^2] |
 | GNU/Linux 3.2.0 | ✓ | 매우 오래된 커널까지 호환 (특이사항 아님) |
 | **stripped** | ✓ | **심볼 정보 제거됨** — 함수/변수 이름 안 보임 |
 
@@ -125,7 +125,7 @@ pydata             7,862,008 bytes   ← 7.86 MB! 전체의 99%
 
 **비정상적인 신호 두 가지가 동시에 보인다:**
 
-1. `pydata` 라는 **표준 ELF 가 아닌 사용자 정의 섹션** 이 존재
+1. `pydata` 라는 **표준 ELF 가 아닌 사용자 정의 섹션[^3]** 이 존재
 2. 실제 코드(`.text`)는 35 KB 인데 데이터가 7.86 MB → **데이터가 코드의 220배**
 
 → "이 바이너리는 평범한 컴파일 결과가 아니다. 뭔가 **묶인 페이로드(packaged payload)** 가 있다." 라는 가설이 선다. `pydata` 이름 자체가 결정적 단서 — **PyInstaller** 가 사용하는 섹션명.
@@ -183,8 +183,8 @@ INTERPRETER: /lib64/ld-linux-x86-64.so.2
 
 ### 도구
 
-- `strings binary` — 4 바이트 이상 ASCII 시퀀스 출력
-- `strings -e l binary` — UTF-16LE 도 같이 (Windows 바이너리 분석 시)
+- `strings binary` — 4 바이트 이상 ASCII 시퀀스 출력[^4]
+- `strings -e l binary` — UTF-16LE 도 같이[^5] (Windows 바이너리 분석 시)
 - Python 정규식 — 카테고리별 필터링
 
 ### 실행
@@ -214,7 +214,7 @@ strings = re.findall(rb"[\x20-\x7e]{8,}", blob)
 
 - **Python 3.12** 가 통째로 번들됨 (`libpython3.12.so.1.0`)
 - **SSL/TLS 통신 기능 보유** (`libssl`, `libcrypto`, `_ssl`, `_hashlib`)
-- **한국어 처리 가능성** (`_codecs_kr` — Python 의 EUC-KR 코덱)
+- **한국어 처리 가능성[^6]** (`_codecs_kr` — Python 의 EUC-KR 코덱)
 - **HTTP 서버 또는 클라이언트** (`http` 모듈)
 - **subprocess** 로 외부 명령 실행 가능
 - bootloader 는 Ubuntu 18.04 GCC 7.5 로 빌드됨
@@ -234,7 +234,7 @@ PyInstaller 의 C 부트로더는 다음 단계로 동작한다:
   → 진입 스크립트(linux_pbl_v2) 실행
 ```
 
-이 흐름을 알면 `_MEIPASS`, `LOADER:`, `SPLASH:` 같은 문자열이 보일 때 PyInstaller 라고 즉시 확신할 수 있다.
+이 흐름을 알면 `_MEIPASS`, `LOADER:`, `SPLASH:` 같은 문자열이 보일 때 PyInstaller 라고 즉시 확신할 수 있다[^7].
 
 ---
 
@@ -246,7 +246,7 @@ PyInstaller 의 C 부트로더는 다음 단계로 동작한다:
 
 ### 도구
 
-- `nm -D binary` — 동적 심볼 테이블 (외부 의존 함수)
+- `nm -D binary` — 동적 심볼 테이블 (외부 의존 함수)[^8]
 - `readelf --dyn-syms binary`
 - pyelftools `SymbolTableSection`
 
@@ -433,8 +433,8 @@ python tools/extract_pyinstaller.py
 | `dis` + 수작업 | 모두 | ✅ (시간 듦) |
 | **메타데이터 추출 + 재구성** | 모두 | ✅ **본 문서가 택한 방법** |
 
-본 미션의 `linux_pbl_v2.pyc` 는 Python 3.12 → uncompyle6/decompyle3 모두 미지원.
-실용적 우회법: **`marshal.load()` 로 code object 를 읽어 들인 뒤, 모든 중첩 code 의 `co_varnames` / `co_names` / `co_consts` / `co_argcount` 를 재귀로 덤프**. 흐름 제어는 추정해야 하지만, 메서드 이름·시그니처·문자열 리터럴은 **100% 정확** 하게 복원된다.
+본 미션의 `linux_pbl_v2.pyc` 는 Python 3.12 → uncompyle6/decompyle3 모두 미지원[^9].
+실용적 우회법: **`marshal.load()` 로 code object 를 읽어 들인 뒤[^10], 모든 중첩 code 의 `co_varnames` / `co_names` / `co_consts` / `co_argcount` 를 재귀로 덤프**. 흐름 제어는 추정해야 하지만, 메서드 이름·시그니처·문자열 리터럴은 **100% 정확** 하게 복원된다.
 
 ### 8-4. 메타데이터 디컴파일러 — [tools/decompile_metadata.py](../../tools/decompile_metadata.py)
 
@@ -644,3 +644,20 @@ python tools/analyze_binary.py
 
 > ELF → 의심 → 의존 → 문자열 → 심볼 → 아카이브 → 바이트코드. 위층에서 답 나오면 멈춰라.
 > 본 `agent-app` 은 Python 3.12 PyInstaller 번들이고, Layer 4 (strings) 만으로도 90% 의 의문이 풀린다.
+
+---
+
+## 출처 & 참고 문헌 (Sources & References)
+
+> 본문 위첨자 각주 번호를 누르면 아래 출처로, ↩ 로 본문 위치로 돌아온다. `⚠` 는 검증 중 발견한 보충/정정. 출처는 1차/표준 자료 우선(man7.org · GNU · PyInstaller · docs.python.org · Wikipedia 등).
+
+[^1]: [file(1) — man7.org](https://man7.org/linux/man-pages/man1/file.1.html)
+[^2]: [ld.so(8) — man7.org](https://man7.org/linux/man-pages/man8/ld.so.8.html) · [elf(5) — man7.org](https://man7.org/linux/man-pages/man5/elf.5.html)
+[^3]: [PyInstaller PR #4450 (pydata section)](https://github.com/pyinstaller/pyinstaller/pull/4450) · [PyInstaller Advanced Topics](https://pyinstaller.org/en/stable/advanced-topics.html)
+[^4]: [strings (GNU Binutils)](https://sourceware.org/binutils/docs/binutils/strings.html) · [strings(1) — man7.org](https://man7.org/linux/man-pages/man1/strings.1.html)
+[^5]: [strings (GNU Binutils) — -e 인코딩](https://sourceware.org/binutils/docs/binutils/strings.html)
+[^6]: ⚠ 보충: _codecs_kr 은 'EUC-KR 전용'이 아니라 euc_kr·cp949·johab 세 한국어 코덱을 등록하는 CJK 코덱 C모듈이다(한국어 처리 가능 서술 자체는 옳음). — [cpython Modules/cjkcodecs/_codecs_kr.c](https://github.com/python/cpython/blob/main/Modules/cjkcodecs/_codecs_kr.c) · [codecs — Standard Encodings](https://docs.python.org/3/library/codecs.html)
+[^7]: [PyInstaller Advanced Topics (부트로더·_MEIPASS)](https://pyinstaller.org/en/stable/advanced-topics.html)
+[^8]: [nm(1)](https://man7.org/linux/man-pages/man1/nm.1.html) · [readelf(1) — man7.org](https://man7.org/linux/man-pages/man1/readelf.1.html)
+[^9]: ⚠ 보충: decompyle3·uncompyle6 의 디컴파일 상한은 모두 3.8 이다(표의 decompyle3 '3.9'는 부정확). 단 대상 .pyc 가 Python 3.12 라 둘 다 미지원이라는 결론 자체는 유효. — [uncompyle6 · PyPI](https://pypi.org/project/uncompyle6/) · [decompyle3 · PyPI](https://pypi.org/project/decompyle3/)
+[^10]: [marshal — docs.python.org](https://docs.python.org/3/library/marshal.html) · [Code Objects (C API)](https://docs.python.org/3/c-api/code.html)
